@@ -5,8 +5,10 @@ import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
 
+if os.path.exists('.env'):
+    load_dotenv()
+    print("🔍 Loaded .env file")
 
 # Debug: Check if .env loaded
 print("🔍 Debug Info:")
