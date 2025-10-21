@@ -1,0 +1,7 @@
+[server]
+fileWatcherType = "none"
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
