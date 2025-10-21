@@ -66,7 +66,7 @@ if user_input := st.chat_input("Ask about welding..."):
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
         
         except requests.exceptions.ConnectionError:
-            error_msg = "❌ Can't connect to backend. Is it running on https://consultation-welderskit.onrender.com?"
+            error_msg = "❌ Can't connect to backend. Is it running on https://consultation-welderskit.onrender.com/?"
             st.error(error_msg)
             st.session_state.messages.append({"role": "assistant", "content": error_msg})
         
@@ -79,4 +79,3 @@ if user_input := st.chat_input("Ask about welding..."):
             error_msg = f"❌ Error: {str(e)}"
             st.error(error_msg)
             st.session_state.messages.append({"role": "assistant", "content": error_msg})
-
