@@ -26,7 +26,7 @@ st.title("🔧 WeldersKit AI")
 st.markdown("Ask me anything about welding, materials, techniques, or prices in Nigeria")
 
 # Backend URL
-BACKEND_URL = "http://127.0.0.1:8000/api/ask"
+BACKEND_URL = "https://consultationwelderskit.pxxl.click/"
 
 # Initialize session state for chat history
 if "messages" not in st.session_state:
@@ -66,7 +66,7 @@ if user_input := st.chat_input("Ask about welding..."):
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
         
         except requests.exceptions.ConnectionError:
-            error_msg = "❌ Can't connect to backend. Is it running on http://127.0.0.1:8000?"
+            error_msg = "❌ Can't connect to backend. Is it running on https://consultationwelderskit.pxxl.click/?"
             st.error(error_msg)
             st.session_state.messages.append({"role": "assistant", "content": error_msg})
         
