@@ -1,81 +1,37 @@
 import streamlit as st
 import requests
-import json
-from dotenv import load_dotenv
 import os
 
-load_dotenv()
-
-# Page config
-st.set_page_config(
-    page_title="WeldersKit AI",
-    page_icon="🔧",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
-
-# Styling
-st.markdown("""
-<style>
-    .main { max-width: 600px; margin: auto; }
-    .stChatMessage { font-size: 16px; }
-</style>
-""", unsafe_allow_html=True)
-
-st.title("🔧 WeldersKit AI")
-st.markdown("Ask me anything about welding, materials, techniques, or prices in Nigeria")
-
 # Backend URL
-BACKEND_URL = "https://consultation-welderskit.onrender.com"
+BACKEND_URL = os.getenv("BACKEND_URL", "https://consultation-welderskit.onrender.com")
 
-# Initialize session state for chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+st.title("WeldersKit Consultation")
 
-# Display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
+# User input
+question = st.text_area("Ask your welding question:", height=100)
 
-# Chat input
-if user_input := st.chat_input("Ask about welding..."):
-    # Add user message to history
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    
-    with st.chat_message("user"):
-        st.write(user_input)
-    
-    # Get response from backend
-    with st.chat_message("assistant"):
-        try:
-            with st.spinner("Thinking..."):
+if st.button("Get Answer"):
+    if question.strip():
+        with st.spinner("Getting answer from AI..."):
+            try:
+                # Call the correct endpoint: /api/ask
                 response = requests.post(
-                    BACKEND_URL,
-                    json={"question": user_input},
-                    timeout=30
+                    f"{BACKEND_URL}/api/ask",  # ✅ Correct endpoint
+                    json={"question": question},
+                    timeout=60  # Important: Render free tier can be slow on first request
                 )
-            
-            if response.status_code == 200:
-                data = response.json()
-                answer = data.get("answer", "No response found.")
-                st.write(answer)
-                st.session_state.messages.append({"role": "assistant", "content": answer})
-            else:
-                error_msg = f"❌ Error {response.status_code}: {response.text}"
-                st.error(error_msg)
-                st.session_state.messages.append({"role": "assistant", "content": error_msg})
-        
-        except requests.exceptions.ConnectionError:
-            error_msg = "❌ Can't connect to backend. Is it running on https://consultation-welderskit.onrender.com/?"
-            st.error(error_msg)
-            st.session_state.messages.append({"role": "assistant", "content": error_msg})
-        
-        except requests.exceptions.Timeout:
-            error_msg = "❌ Request timeout. Backend took too long to respond."
-            st.error(error_msg)
-            st.session_state.messages.append({"role": "assistant", "content": error_msg})
-        
-        except Exception as e:
-            error_msg = f"❌ Error: {str(e)}"
-            st.error(error_msg)
-            st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    st.success("✅ Answer:")
+                    st.write(result["answer"])
+                    st.caption(f"Source: {result['sources']}")
+                else:
+                    st.error(f"Error {response.status_code}: {response.text}")
+                    
+            except requests.exceptions.Timeout:
+                st.error("⏱️ Request timed out. The backend might be waking up (Render free tier). Please try again.")
+            except Exception as e:
+                st.error(f"❌ Failed to connect: {str(e)}")
+    else:
+        st.warning("Please enter a question")
