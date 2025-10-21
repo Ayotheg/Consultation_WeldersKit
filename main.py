@@ -1,64 +1,81 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import google.generativeai as genai
-import os
+import streamlit as st
+import requests
+import json
 from dotenv import load_dotenv
+import os
 
 load_dotenv()
 
-
-# Debug: Check if .env loaded
-print("🔍 Debug Info:")
-print(f"Current directory: {os.getcwd()}")
-print(f"Files in current directory: {os.listdir()}")
-print(f"GOOGLE_API_KEY value: {os.getenv('GOOGLE_API_KEY')}")
-print(f"All env vars: {dict(os.environ)}")
-
-# Initialize FastAPI
-app = FastAPI(title="WeldersKit AI API")
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Page config
+st.set_page_config(
+    page_title="WeldersKit AI",
+    page_icon="🔧",
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
-# Configure Gemini
-api_key =os.getenv('GOOGLE_API_KEY')
-if not api_key:
-    print("❌ ERROR: GOOGLE_API_KEY not set!")
-else:
-    print(f"✅ API Key found: {api_key[:10]}...")
-    genai.configure(api_key=api_key)
+# Styling
+st.markdown("""
+<style>
+    .main { max-width: 600px; margin: auto; }
+    .stChatMessage { font-size: 16px; }
+</style>
+""", unsafe_allow_html=True)
 
-model = genai.GenerativeModel('gemini-2.0-flash-lite')
+st.title("🔧 WeldersKit AI")
+st.markdown("Ask me anything about welding, materials, techniques, or prices in Nigeria")
 
-class QuestionRequest(BaseModel):
-    question: str
+# Backend URL
+BACKEND_URL = "https://consultation-welderskit.onrender.com"
 
-class AnswerResponse(BaseModel):
-    answer: str
-    sources: str = "AI"
+# Initialize session state for chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-@app.post("/api/ask", response_model=AnswerResponse)
-async def ask_question(request: QuestionRequest):
-    try:
-        if not api_key:
-            raise HTTPException(status_code=500, detail="API key not configured")
-            
-        response = model.generate_content(f"You are a welding expert for WeldersKit in Nigeria.\n\nQuestion: {request.question}\n\nProvide a helpful answer.")
-        answer = response.text
-        
-        return AnswerResponse(answer=answer, sources="AI Knowledge")
+# Display chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
+
+# Chat input
+if user_input := st.chat_input("Ask about welding..."):
+    # Add user message to history
+    st.session_state.messages.append({"role": "user", "content": user_input})
     
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    with st.chat_message("user"):
+        st.write(user_input)
+    
+    # Get response from backend
+    with st.chat_message("assistant"):
+        try:
+            with st.spinner("Thinking..."):
+                response = requests.post(
+                    BACKEND_URL,
+                    json={"question": user_input},
+                    timeout=30
+                )
+            
+            if response.status_code == 200:
+                data = response.json()
+                answer = data.get("answer", "No response found.")
+                st.write(answer)
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+            else:
+                error_msg = f"❌ Error {response.status_code}: {response.text}"
+                st.error(error_msg)
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+        
+        except requests.exceptions.ConnectionError:
+            error_msg = "❌ Can't connect to backend. Is it running on https://consultation-welderskit.onrender.com/?"
+            st.error(error_msg)
+            st.session_state.messages.append({"role": "assistant", "content": error_msg})
+        
+        except requests.exceptions.Timeout:
+            error_msg = "❌ Request timeout. Backend took too long to respond."
+            st.error(error_msg)
+            st.session_state.messages.append({"role": "assistant", "content": error_msg})
+        
+        except Exception as e:
+            error_msg = f"❌ Error: {str(e)}"
+            st.error(error_msg)
+            st.session_state.messages.append({"role": "assistant", "content": error_msg})
