@@ -2,14 +2,18 @@ import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import faiss
-import google.generativeai as genai
+import requests  # Changed from google.generativeai
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class AlwaysHybridRAG:
     """
     RAG system that ALWAYS combines:
     1. Dataset knowledge (your CSV)
-    2. AI general knowledge (Gemini)
+    2. AI general knowledge (Gemini via OpenRouter)
     
     Never falls back - always uses both together!
     """
@@ -21,14 +25,15 @@ class AlwaysHybridRAG:
         self.index = None
         self.embedding_model = None
         
-        # Initialize Gemini
-        api_key = os.getenv('GOOGLE_API_KEY')
+        # Initialize OpenRouter
+        api_key = os.getenv('OPENROUTER_API_KEY')
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY not set! Set it with: os.environ['GOOGLE_API_KEY'] = 'your-key'")
+            raise ValueError("OPENROUTER_API_KEY not set! Set it with: os.environ['OPENROUTER_API_KEY'] = 'your-key'")
         
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash-lite')
-        print("✅ Gemini API configured")
+        self.api_key = api_key
+        self.api_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.model_name = "google/gemini-2.0-flash-exp:free"  # Free Gemini model via OpenRouter
+        print("✅ OpenRouter API configured")
     
     def load_data(self):
         """Load dataset"""
@@ -101,7 +106,7 @@ class AlwaysHybridRAG:
     
     def generate_combined_answer(self, query, dataset_results):
         """
-        ALWAYS combine dataset + AI knowledge
+        ALWAYS combine dataset + AI knowledge using OpenRouter
         """
         
         # Build dataset context
@@ -141,25 +146,39 @@ Nigerian Context:
 - Popular welding: Arc/SMAW (affordable, works outdoors)
 """
 
-        # Build final prompt
-        prompt = f"""{system_prompt}
-
-{dataset_context if dataset_context else "No specific database matches found for this query. Provide comprehensive answer using your general knowledge."}
+        # Build user message
+        user_message = f"""{dataset_context if dataset_context else "No specific database matches found for this query. Provide comprehensive answer using your general knowledge."}
 
 USER QUESTION: {query}
 
 COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config={
-                    'temperature': 0.7,
-                    'top_p': 0.95,
-                    'max_output_tokens': 1024,
-                }
+            # OpenRouter API call
+            response = requests.post(
+                url=self.api_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "HTTP-Referer": "http://localhost:3000",
+                    "X-Title": "WeldersKit RAG"
+                },
+                json={
+                    "model": self.model_name,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1024
+                },
+                timeout=30
             )
-            return response.text
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            return result['choices'][0]['message']['content']
+            
         except Exception as e:
             return f"❌ Error generating answer: {e}"
     
@@ -235,7 +254,7 @@ if __name__ == "__main__":
     print("="*70)
     
     # Set API key (do this before running)
-    # os.environ['GOOGLE_API_KEY'] = 'your-api-key-here'
+    # os.environ['OPENROUTER_API_KEY'] = 'sk-or-v1-...'
     
     try:
         # Initialize
@@ -297,6 +316,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Failed to initialize: {e}")
         print("\nMake sure:")
-        print("1. GOOGLE_API_KEY is set")
+        print("1. OPENROUTER_API_KEY is set")
         print("2. welders_data-main.csv exists")
         print("3. Required packages installed")
