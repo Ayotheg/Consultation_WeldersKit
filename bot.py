@@ -26,9 +26,14 @@ class AlwaysHybridRAG:
         self.embedding_model = None
         
         # Initialize OpenRouter
-        api_key = os.getenv('OPENROUTER_API_KEY')
+        # Check both OPENROUTER_API_KEY and GOOGLE_API_KEY (for backwards compatibility)
+        api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('GOOGLE_API_KEY')
         if not api_key:
-            raise ValueError("OPENROUTER_API_KEY not set! Set it with: os.environ['OPENROUTER_API_KEY'] = 'your-key'")
+            raise ValueError("API key not set! Set either OPENROUTER_API_KEY or GOOGLE_API_KEY environment variable")
+        
+        # Validate it's an OpenRouter key
+        if not api_key.startswith('sk-or-'):
+            raise ValueError("Invalid OpenRouter key! Key should start with 'sk-or-'. Get your key from https://openrouter.ai/keys")
         
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
