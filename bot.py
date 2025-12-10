@@ -73,8 +73,8 @@ class AlwaysHybridRAG:
         # Try multiple free models in order of preference
         # If one fails, we'll fall back to the next
         self.models = [
+             "google/gemini-2.0-flash-exp:free",  # Alternative Gemini
             "meta-llama/llama-3.2-3b-instruct:free",  # Fast, reliable
-            "google/gemini-flash-1.5:free",  # Alternative Gemini
             "qwen/qwen-2-7b-instruct:free",  # Backup option
         ]
         self.model_name = self.models[0]  # Start with first model
