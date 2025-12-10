@@ -2,12 +2,26 @@ import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import faiss
-import requests  # Changed from google.generativeai
+import requests
 import os
+import sys
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# DEBUG: Check what environment variables are available
+print("=" * 70, file=sys.stderr)
+print("DEBUG: Checking environment variables...", file=sys.stderr)
+google_key = os.getenv('GOOGLE_API_KEY')
+openrouter_key = os.getenv('OPENROUTER_API_KEY')
+print(f"GOOGLE_API_KEY present: {bool(google_key)}", file=sys.stderr)
+print(f"OPENROUTER_API_KEY present: {bool(openrouter_key)}", file=sys.stderr)
+if google_key:
+    print(f"GOOGLE_API_KEY value starts with: {google_key[:15]}...", file=sys.stderr)
+if openrouter_key:
+    print(f"OPENROUTER_API_KEY value starts with: {openrouter_key[:15]}...", file=sys.stderr)
+print("=" * 70, file=sys.stderr)
 
 class AlwaysHybridRAG:
     """
@@ -25,20 +39,49 @@ class AlwaysHybridRAG:
         self.index = None
         self.embedding_model = None
         
-        # Initialize OpenRouter
-        # Check both OPENROUTER_API_KEY and GOOGLE_API_KEY (for backwards compatibility)
-        api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('GOOGLE_API_KEY')
+        # Initialize OpenRouter - Check BOTH possible env var names
+        print("\n🔑 Checking for API key...", file=sys.stderr)
+        
+        # Try OPENROUTER_API_KEY first, then fall back to GOOGLE_API_KEY
+        api_key = os.getenv('OPENROUTER_API_KEY')
         if not api_key:
-            raise ValueError("API key not set! Set either OPENROUTER_API_KEY or GOOGLE_API_KEY environment variable")
+            print("⚠️ OPENROUTER_API_KEY not found, trying GOOGLE_API_KEY...", file=sys.stderr)
+            api_key = os.getenv('GOOGLE_API_KEY')
+        
+        if not api_key:
+            raise ValueError(
+                "❌ API key not found! Please set one of these environment variables:\n"
+                "   - OPENROUTER_API_KEY=sk-or-v1-...\n"
+                "   - GOOGLE_API_KEY=sk-or-v1-...\n"
+                "Get your key from: https://openrouter.ai/keys"
+            )
+        
+        print(f"✅ Found API key: {api_key[:15]}...", file=sys.stderr)
         
         # Validate it's an OpenRouter key
         if not api_key.startswith('sk-or-'):
-            raise ValueError("Invalid OpenRouter key! Key should start with 'sk-or-'. Get your key from https://openrouter.ai/keys")
+            raise ValueError(
+                f"❌ Invalid OpenRouter key format!\n"
+                f"   Expected: sk-or-v1-...\n"
+                f"   Got: {api_key[:15]}...\n"
+                f"   Get your OpenRouter key from: https://openrouter.ai/keys"
+            )
         
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.model_name = "google/gemini-2.0-flash-exp:free"  # Free Gemini model via OpenRouter
-        print("✅ OpenRouter API configured")
+        
+        # Try multiple free models in order of preference
+        # If one fails, we'll fall back to the next
+        self.models = [
+            "meta-llama/llama-3.2-3b-instruct:free",  # Fast, reliable
+            "google/gemini-flash-1.5:free",  # Alternative Gemini
+            "qwen/qwen-2-7b-instruct:free",  # Backup option
+        ]
+        self.model_name = self.models[0]  # Start with first model
+        
+        print(f"✅ OpenRouter API configured successfully!", file=sys.stderr)
+        print(f"   Primary Model: {self.model_name}", file=sys.stderr)
+        print(f"   Endpoint: {self.api_url}", file=sys.stderr)
     
     def load_data(self):
         """Load dataset"""
@@ -159,33 +202,65 @@ USER QUESTION: {query}
 COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         
         try:
-            # OpenRouter API call
-            response = requests.post(
-                url=self.api_url,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "HTTP-Referer": "http://localhost:3000",
-                    "X-Title": "WeldersKit RAG"
-                },
-                json={
-                    "model": self.model_name,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message}
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 1024
-                },
-                timeout=30
-            )
+            print(f"🔄 Calling OpenRouter API...", file=sys.stderr)
+            print(f"   Model: {self.model_name}", file=sys.stderr)
             
-            response.raise_for_status()
-            result = response.json()
+            # OpenRouter API call with retry logic
+            last_error = None
             
-            return result['choices'][0]['message']['content']
+            for attempt, model in enumerate(self.models, 1):
+                try:
+                    print(f"   Attempt {attempt}: Trying {model}...", file=sys.stderr)
+                    
+                    response = requests.post(
+                        url=self.api_url,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "HTTP-Referer": "https://consultation-welderskit.onrender.com",
+                            "X-Title": "WeldersKit RAG"
+                        },
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_message}
+                            ],
+                            "temperature": 0.7,
+                            "max_tokens": 1024
+                        },
+                        timeout=30
+                    )
+                    
+                    print(f"📥 API Response Status: {response.status_code}", file=sys.stderr)
+                    
+                    if response.ok:
+                        result = response.json()
+                        
+                        if 'choices' in result and len(result['choices']) > 0:
+                            answer = result['choices'][0]['message']['content']
+                            print(f"✅ Successfully generated answer with {model} ({len(answer)} chars)", file=sys.stderr)
+                            self.model_name = model  # Remember the working model
+                            return answer
+                    
+                    # If this model failed, try next one
+                    last_error = response.text
+                    print(f"⚠️ Model {model} failed: {last_error[:100]}...", file=sys.stderr)
+                    
+                except requests.exceptions.Timeout:
+                    print(f"⚠️ Model {model} timed out", file=sys.stderr)
+                    last_error = "Request timed out"
+                    continue
+                except Exception as e:
+                    print(f"⚠️ Model {model} error: {e}", file=sys.stderr)
+                    last_error = str(e)
+                    continue
+            
+            # All models failed
+            return f"❌ All AI models failed. Last error: {last_error}"
             
         except Exception as e:
-            return f"❌ Error generating answer: {e}"
+            print(f"❌ Unexpected error: {e}", file=sys.stderr)
+            return f"❌ Error generating answer: {str(e)}"
     
     def query(self, question):
         """
@@ -259,6 +334,10 @@ if __name__ == "__main__":
     print("="*70)
     
     # Set API key (do this before running)
+    # Option 1: Set in .env file
+    # OPENROUTER_API_KEY=sk-or-v1-...
+    #
+    # Option 2: Set as environment variable
     # os.environ['OPENROUTER_API_KEY'] = 'sk-or-v1-...'
     
     try:
@@ -321,6 +400,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Failed to initialize: {e}")
         print("\nMake sure:")
-        print("1. OPENROUTER_API_KEY is set")
+        print("1. OPENROUTER_API_KEY or GOOGLE_API_KEY is set with your OpenRouter key (sk-or-v1-...)")
         print("2. welders_data-main.csv exists")
-        print("3. Required packages installed")
+        print("3. Required packages installed: pip install pandas numpy sentence-transformers faiss-cpu requests python-dotenv")
