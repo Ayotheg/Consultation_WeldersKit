@@ -27,7 +27,7 @@ class AlwaysHybridRAG:
     """
     RAG system that ALWAYS combines:
     1. Dataset knowledge (your CSV)
-    2. AI general knowledge (Gemini via OpenRouter)
+    2. AI general knowledge (Gemini 2.0 Flash via OpenRouter)
     
     Never falls back - always uses both together!
     """
@@ -70,17 +70,11 @@ class AlwaysHybridRAG:
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # Try multiple free models in order of preference
-        # If one fails, we'll fall back to the next
-        self.models = [
-            "meta-llama/llama-3.2-3b-instruct:free",  # Fast, reliable
-            "google/gemini-flash-1.5:free",  # Alternative Gemini
-            "qwen/qwen-2-7b-instruct:free",  # Backup option
-        ]
-        self.model_name = self.models[0]  # Start with first model
+        # ONLY use Gemini 2.0 Flash Exp
+        self.model_name = "google/gemini-2.0-flash-exp:free"
         
         print(f"✅ OpenRouter API configured successfully!", file=sys.stderr)
-        print(f"   Primary Model: {self.model_name}", file=sys.stderr)
+        print(f"   Model: {self.model_name}", file=sys.stderr)
         print(f"   Endpoint: {self.api_url}", file=sys.stderr)
     
     def load_data(self):
@@ -154,7 +148,7 @@ class AlwaysHybridRAG:
     
     def generate_combined_answer(self, query, dataset_results):
         """
-        ALWAYS combine dataset + AI knowledge using OpenRouter
+        ALWAYS combine dataset + AI knowledge using OpenRouter with Gemini 2.0 Flash
         """
         
         # Build dataset context
@@ -205,59 +199,43 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
             print(f"🔄 Calling OpenRouter API...", file=sys.stderr)
             print(f"   Model: {self.model_name}", file=sys.stderr)
             
-            # OpenRouter API call with retry logic
-            last_error = None
+            response = requests.post(
+                url=self.api_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "HTTP-Referer": "https://consultation-welderskit.onrender.com",
+                    "X-Title": "WeldersKit RAG"
+                },
+                json={
+                    "model": self.model_name,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1024
+                },
+                timeout=30
+            )
             
-            for attempt, model in enumerate(self.models, 1):
-                try:
-                    print(f"   Attempt {attempt}: Trying {model}...", file=sys.stderr)
-                    
-                    response = requests.post(
-                        url=self.api_url,
-                        headers={
-                            "Authorization": f"Bearer {self.api_key}",
-                            "HTTP-Referer": "https://consultation-welderskit.onrender.com",
-                            "X-Title": "WeldersKit RAG"
-                        },
-                        json={
-                            "model": model,
-                            "messages": [
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_message}
-                            ],
-                            "temperature": 0.7,
-                            "max_tokens": 1024
-                        },
-                        timeout=30
-                    )
-                    
-                    print(f"📥 API Response Status: {response.status_code}", file=sys.stderr)
-                    
-                    if response.ok:
-                        result = response.json()
-                        
-                        if 'choices' in result and len(result['choices']) > 0:
-                            answer = result['choices'][0]['message']['content']
-                            print(f"✅ Successfully generated answer with {model} ({len(answer)} chars)", file=sys.stderr)
-                            self.model_name = model  # Remember the working model
-                            return answer
-                    
-                    # If this model failed, try next one
-                    last_error = response.text
-                    print(f"⚠️ Model {model} failed: {last_error[:100]}...", file=sys.stderr)
-                    
-                except requests.exceptions.Timeout:
-                    print(f"⚠️ Model {model} timed out", file=sys.stderr)
-                    last_error = "Request timed out"
-                    continue
-                except Exception as e:
-                    print(f"⚠️ Model {model} error: {e}", file=sys.stderr)
-                    last_error = str(e)
-                    continue
+            print(f"📥 API Response Status: {response.status_code}", file=sys.stderr)
             
-            # All models failed
-            return f"❌ All AI models failed. Last error: {last_error}"
+            if response.ok:
+                result = response.json()
+                
+                if 'choices' in result and len(result['choices']) > 0:
+                    answer = result['choices'][0]['message']['content']
+                    print(f"✅ Successfully generated answer ({len(answer)} chars)", file=sys.stderr)
+                    return answer
             
+            # If failed, return error
+            error_detail = response.text
+            print(f"❌ API Error: {error_detail[:200]}...", file=sys.stderr)
+            return f"❌ AI API error: {error_detail[:200]}..."
+            
+        except requests.exceptions.Timeout:
+            print(f"❌ Request timed out", file=sys.stderr)
+            return "❌ Request timed out after 30 seconds. Please try again."
         except Exception as e:
             print(f"❌ Unexpected error: {e}", file=sys.stderr)
             return f"❌ Error generating answer: {str(e)}"
@@ -293,17 +271,18 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         print(f"📊 Sources Used:")
         if dataset_results:
             print(f"   ✅ Database: {len(dataset_results)} relevant entries")
-            print(f"   ✅ AI Knowledge: Enhanced with general expertise")
+            print(f"   ✅ AI Knowledge (Gemini 2.0 Flash): Enhanced with general expertise")
         else:
             print(f"   ⚠️ Database: No relevant matches")
-            print(f"   ✅ AI Knowledge: Full answer from general knowledge")
+            print(f"   ✅ AI Knowledge (Gemini 2.0 Flash): Full answer from general knowledge")
         print(f"{'='*70}\n")
         
         return {
             'question': question,
             'answer': answer,
             'database_matches': len(dataset_results),
-            'sources': 'Database + AI' if dataset_results else 'AI Only'
+            'sources': 'Database + AI (Gemini 2.0)' if dataset_results else 'AI Only (Gemini 2.0)',
+            'model_used': self.model_name
         }
     
     def initialize(self):
@@ -324,82 +303,3 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         
         print("="*70)
         return True
-
-
-# ============= USAGE =============
-
-if __name__ == "__main__":
-    print("\n" + "="*70)
-    print("     WELDERSKIT HYBRID RAG - ALWAYS COMBINES DATA + AI")
-    print("="*70)
-    
-    # Set API key (do this before running)
-    # Option 1: Set in .env file
-    # OPENROUTER_API_KEY=sk-or-v1-...
-    #
-    # Option 2: Set as environment variable
-    # os.environ['OPENROUTER_API_KEY'] = 'sk-or-v1-...'
-    
-    try:
-        # Initialize
-        rag = AlwaysHybridRAG(csv_file='welders_data-main.csv')
-        rag.initialize()
-        
-        # Test questions (mix of database and general topics)
-        test_questions = [
-            # Questions likely in database
-            "What is the price of galvanized pipes?",
-            "Where can I buy square pipes in Nigeria?",
-            "How much does stainless steel pipe cost?",
-            
-            # Questions likely NOT in database (AI will fill in)
-            "How do I prevent rust on my gate?",
-            "What's the best welding rod for aluminum?",
-            "How to calculate material cost for a 10ft gate?",
-            "What safety equipment is essential for welding?",
-            "How do I weld in rainy weather?",
-        ]
-        
-        print("\n" + "="*70)
-        print("TESTING HYBRID SYSTEM")
-        print("="*70)
-        
-        for i, question in enumerate(test_questions, 1):
-            print(f"\n[Test {i}/{len(test_questions)}]")
-            rag.query(question)
-            
-            if i < len(test_questions):
-                input("\nPress Enter for next question...")
-        
-        # Interactive mode
-        print("\n" + "="*70)
-        print("🤖 INTERACTIVE MODE")
-        print("="*70)
-        print("Ask anything about welding, materials, prices, techniques...")
-        print("Type 'exit' to quit\n")
-        
-        while True:
-            try:
-                user_q = input("\nYour question: ").strip()
-                
-                if user_q.lower() in ['exit', 'quit', 'q']:
-                    print("\n👋 Thank you for using WeldersKit AI!")
-                    break
-                
-                if not user_q:
-                    continue
-                
-                rag.query(user_q)
-                
-            except KeyboardInterrupt:
-                print("\n\n👋 Goodbye!")
-                break
-            except Exception as e:
-                print(f"\n❌ Error: {e}")
-    
-    except Exception as e:
-        print(f"\n❌ Failed to initialize: {e}")
-        print("\nMake sure:")
-        print("1. OPENROUTER_API_KEY or GOOGLE_API_KEY is set with your OpenRouter key (sk-or-v1-...)")
-        print("2. welders_data-main.csv exists")
-        print("3. Required packages installed: pip install pandas numpy sentence-transformers faiss-cpu requests python-dotenv")
