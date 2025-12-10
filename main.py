@@ -1,19 +1,15 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import requests
 import os
 from dotenv import load_dotenv
+
+# Import the RAG system from bot.py
+from bot import AlwaysHybridRAG
 
 if os.path.exists('.env'):
     load_dotenv()
     print("🔍 Loaded .env file")
-
-# Debug: Check if .env loaded
-print("🔍 Debug Info:")
-print(f"Current directory: {os.getcwd()}")
-print(f"Files in current directory: {os.listdir()}")
-print(f"GOOGLE_API_KEY value: {os.getenv('GOOGLE_API_KEY')}")
 
 # Initialize FastAPI
 app = FastAPI(title="WeldersKit AI API")
@@ -31,28 +27,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure OpenRouter API
-api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('GOOGLE_API_KEY')
+# Initialize RAG system once at startup
+rag = None
 
-if not api_key:
-    print("❌ ERROR: API key not set!")
-else:
-    print(f"✅ API Key found: {api_key[:15]}...")
-    
-    # Validate it's an OpenRouter key
-    if not api_key.startswith('sk-or-'):
-        print(f"⚠️ WARNING: API key doesn't look like an OpenRouter key (should start with sk-or-)")
-
-# OpenRouter configuration
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-PRIMARY_MODEL = "google/gemini-2.0-flash-exp:free"
-
-# Backup models if primary fails
-BACKUP_MODELS = [
-    "meta-llama/llama-3.2-3b-instruct:free",
-    "google/gemini-flash-1.5:free",
-    "qwen/qwen-2-7b-instruct:free",
-]
+@app.on_event("startup")
+async def startup_event():
+    """Initialize RAG system when FastAPI starts"""
+    global rag
+    try:
+        print("\n" + "="*70)
+        print("🚀 Starting WeldersKit AI Backend")
+        print("="*70)
+        
+        rag = AlwaysHybridRAG(csv_file='welders_data-main.csv')
+        rag.initialize()
+        
+        print("\n✅ Backend ready to serve requests!")
+        print("="*70 + "\n")
+    except Exception as e:
+        print(f"❌ Failed to initialize RAG system: {e}")
+        print("⚠️ API will run in fallback mode (AI only, no database)")
+        rag = None
 
 class QuestionRequest(BaseModel):
     question: str
@@ -61,133 +56,63 @@ class AnswerResponse(BaseModel):
     answer: str
     sources: str = "AI"
     model_used: str = ""
-
-def call_openrouter(question: str, model: str) -> dict:
-    """Call OpenRouter API with a specific model"""
-    
-    system_prompt = """You are an expert welding and construction consultant for WeldersKit in Nigeria.
-
-Provide comprehensive, practical answers about:
-- Welding techniques and safety
-- Materials and pricing (in Nigerian Naira ₦)
-- Nigerian market context (Idumota, Ladipo, Trade Fair markets)
-- Climate considerations (humid, tropical)
-- Common projects (gates, railings, window protectors, carports)
-
-Be helpful, accurate, and consider local Nigerian context."""
-
-    try:
-        response = requests.post(
-            url=OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://consultation-welderskit.onrender.com",
-                "X-Title": "WeldersKit AI"
-            },
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": question}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 1024
-            },
-            timeout=30
-        )
-        
-        if response.ok:
-            result = response.json()
-            if 'choices' in result and len(result['choices']) > 0:
-                return {
-                    "success": True,
-                    "answer": result['choices'][0]['message']['content'],
-                    "model": model
-                }
-        
-        return {
-            "success": False,
-            "error": response.text
-        }
-        
-    except requests.exceptions.Timeout:
-        return {
-            "success": False,
-            "error": "Request timed out"
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+    database_matches: int = 0
 
 @app.post("/api/ask", response_model=AnswerResponse)
 async def ask_question(request: QuestionRequest):
+    """Ask a welding-related question"""
     try:
-        if not api_key:
-            raise HTTPException(status_code=500, detail="API key not configured")
-        
-        print(f"\n{'='*70}")
-        print(f"❓ Question: {request.question}")
-        print(f"{'='*70}")
-        
-        # Try primary model first
-        print(f"🔄 Trying primary model: {PRIMARY_MODEL}")
-        result = call_openrouter(request.question, PRIMARY_MODEL)
-        
-        if result["success"]:
-            print(f"✅ Success with {result['model']}")
-            return AnswerResponse(
-                answer=result["answer"],
-                sources="AI Knowledge",
-                model_used=result["model"]
+        if not rag:
+            raise HTTPException(
+                status_code=503,
+                detail="RAG system not initialized. Service temporarily unavailable."
             )
         
-        print(f"⚠️ Primary model failed: {result['error'][:100]}...")
+        # Use the RAG system to get answer
+        result = rag.query(request.question)
         
-        # Try backup models
-        for backup_model in BACKUP_MODELS:
-            print(f"🔄 Trying backup model: {backup_model}")
-            result = call_openrouter(request.question, backup_model)
-            
-            if result["success"]:
-                print(f"✅ Success with {result['model']}")
-                return AnswerResponse(
-                    answer=result["answer"],
-                    sources="AI Knowledge",
-                    model_used=result["model"]
-                )
-            
-            print(f"⚠️ {backup_model} failed: {result['error'][:100]}...")
-        
-        # All models failed
-        raise HTTPException(
-            status_code=500,
-            detail=f"All AI models failed. Last error: {result.get('error', 'Unknown error')}"
+        return AnswerResponse(
+            answer=result['answer'],
+            sources=result['sources'],
+            model_used=result.get('model_used', 'google/gemini-2.0-flash-exp:free'),
+            database_matches=result.get('database_matches', 0)
         )
     
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error in ask_question: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 async def root():
+    """Root endpoint - API information"""
     return {
         "message": "WeldersKit AI API",
         "status": "online",
+        "model": "google/gemini-2.0-flash-exp:free (via OpenRouter)",
+        "features": [
+            "Database search with embeddings",
+            "AI-powered answers with Gemini 2.0 Flash",
+            "Nigerian market context",
+            "Hybrid RAG (always combines database + AI)"
+        ],
         "endpoints": {
-            "/api/ask": "POST - Ask a welding question"
+            "/api/ask": "POST - Ask a welding question",
+            "/health": "GET - Health check"
         }
     }
 
 @app.get("/health")
 async def health():
+    """Health check endpoint"""
     return {
-        "status": "healthy",
-        "api_configured": bool(api_key),
-        "primary_model": PRIMARY_MODEL
+        "status": "healthy" if rag else "degraded",
+        "rag_initialized": bool(rag),
+        "model": "google/gemini-2.0-flash-exp:free",
+        "api_endpoint": "https://openrouter.ai/api/v1/chat/completions",
+        "database_loaded": rag.df is not None if rag else False,
+        "embeddings_ready": rag.index is not None if rag else False
     }
 
 if __name__ == "__main__":
