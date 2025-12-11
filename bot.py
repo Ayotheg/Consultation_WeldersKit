@@ -1,7 +1,5 @@
 import pandas as pd
 import numpy as np
-from sentence_transformers import SentenceTransformer
-import faiss
 import requests
 import os
 import sys
@@ -25,19 +23,13 @@ print("=" * 70, file=sys.stderr)
 
 class AlwaysHybridRAG:
     """
-    RAG system that ALWAYS combines:
-    1. Dataset knowledge (your CSV)
-    2. AI general knowledge (Gemini 2.0 Flash via OpenRouter)
-    
-    Never falls back - always uses both together!
+    LIGHTWEIGHT RAG: Simple keyword search + AI (no embeddings!)
+    Uses only ~100MB memory - perfect for 512MB free tier
     """
     
     def __init__(self, csv_file='welders_data-main.csv'):
         self.csv_file = csv_file
         self.df = None
-        self.embeddings = None
-        self.index = None
-        self.embedding_model = None
         
         # Initialize OpenRouter - Check BOTH possible env var names
         print("\n🔑 Checking for API key...", file=sys.stderr)
@@ -70,11 +62,17 @@ class AlwaysHybridRAG:
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # ONLY use Gemini 2.0 Flash Exp
-        self.model_name = "google/gemini-2.0-flash-exp:free"
+        # Model priority: Try Gemini first, fall back only if it fails
+        self.models = [
+            "google/gemini-2.0-flash-exp:free",     # PRIMARY - Your preferred model
+            "meta-llama/llama-3.2-3b-instruct:free", # Backup 1
+            "qwen/qwen-2-7b-instruct:free",          # Backup 2
+        ]
+        self.model_name = self.models[0]
         
         print(f"✅ OpenRouter API configured successfully!", file=sys.stderr)
-        print(f"   Model: {self.model_name}", file=sys.stderr)
+        print(f"   Primary Model: {self.model_name}", file=sys.stderr)
+        print(f"   Backup Models: {len(self.models)-1}", file=sys.stderr)
         print(f"   Endpoint: {self.api_url}", file=sys.stderr)
     
     def load_data(self):
@@ -94,49 +92,34 @@ class AlwaysHybridRAG:
             print(f"⚠️ Could not load dataset: {e}")
             return False
     
-    def setup_embeddings(self):
-        """Setup embeddings for dataset search"""
+    def search_dataset_simple(self, query, k=5):
+        """Simple keyword-based search (no embeddings needed!)"""
         if self.df is None or len(self.df) == 0:
-            print("⚠️ No dataset available for embeddings")
-            return False
-        
-        try:
-            print("🔮 Creating embeddings...")
-            self.embedding_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-            
-            docs = [f"{row['question']} {row['answer']}" for _, row in self.df.iterrows()]
-            self.embeddings = self.embedding_model.encode(docs, convert_to_numpy=True, show_progress_bar=True)
-            
-            # FAISS index
-            dimension = self.embeddings.shape[1]
-            self.index = faiss.IndexFlatIP(dimension)
-            faiss.normalize_L2(self.embeddings)
-            self.index.add(self.embeddings)
-            
-            print(f"✅ Embeddings ready: {self.index.ntotal} vectors")
-            return True
-        except Exception as e:
-            print(f"⚠️ Embedding failed: {e}")
-            return False
-    
-    def search_dataset(self, query, k=5, threshold=0.2):
-        """Search dataset (lower threshold to get more context)"""
-        if self.index is None or self.embedding_model is None:
             return []
         
         try:
-            query_vec = self.embedding_model.encode([query], convert_to_numpy=True)
-            faiss.normalize_L2(query_vec)
+            # Convert query to lowercase and split into keywords
+            keywords = query.lower().split()
             
-            scores, indices = self.index.search(query_vec, k)
+            # Score each row based on keyword matches
+            scores = []
+            for idx, row in self.df.iterrows():
+                text = f"{row['question']} {row['answer']}".lower()
+                score = sum(1 for keyword in keywords if keyword in text)
+                scores.append((idx, score))
             
+            # Sort by score and take top k
+            scores.sort(key=lambda x: x[1], reverse=True)
+            top_matches = scores[:k]
+            
+            # Return results with score > 0
             results = []
-            for idx, score in zip(indices[0], scores[0]):
-                if score >= threshold and idx < len(self.df):
+            for idx, score in top_matches:
+                if score > 0:
                     results.append({
                         'question': self.df.iloc[idx]['question'],
                         'answer': self.df.iloc[idx]['answer'],
-                        'score': float(score),
+                        'score': float(score) / len(keywords),  # Normalize score
                         'price': self.df.iloc[idx].get('price_range', 'N/A'),
                         'location': self.df.iloc[idx].get('location', 'Nigeria')
                     })
@@ -148,7 +131,7 @@ class AlwaysHybridRAG:
     
     def generate_combined_answer(self, query, dataset_results):
         """
-        ALWAYS combine dataset + AI knowledge using OpenRouter with Gemini 2.0 Flash
+        ALWAYS combine dataset + AI knowledge using OpenRouter
         """
         
         # Build dataset context
@@ -197,45 +180,60 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         
         try:
             print(f"🔄 Calling OpenRouter API...", file=sys.stderr)
-            print(f"   Model: {self.model_name}", file=sys.stderr)
             
-            response = requests.post(
-                url=self.api_url,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "HTTP-Referer": "https://consultation-welderskit.onrender.com",
-                    "X-Title": "WeldersKit RAG"
-                },
-                json={
-                    "model": self.model_name,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message}
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 1024
-                },
-                timeout=30
-            )
+            # Try models in order of priority
+            last_error = None
             
-            print(f"📥 API Response Status: {response.status_code}", file=sys.stderr)
+            for attempt, model in enumerate(self.models, 1):
+                try:
+                    print(f"   Attempt {attempt}: Trying {model}...", file=sys.stderr)
+                    
+                    response = requests.post(
+                        url=self.api_url,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "HTTP-Referer": "https://consultation-welderskit.onrender.com",
+                            "X-Title": "WeldersKit RAG"
+                        },
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_message}
+                            ],
+                            "temperature": 0.7,
+                            "max_tokens": 1024
+                        },
+                        timeout=30
+                    )
+                    
+                    print(f"📥 API Response Status: {response.status_code}", file=sys.stderr)
+                    
+                    if response.ok:
+                        result = response.json()
+                        
+                        if 'choices' in result and len(result['choices']) > 0:
+                            answer = result['choices'][0]['message']['content']
+                            print(f"✅ Successfully generated answer with {model} ({len(answer)} chars)", file=sys.stderr)
+                            self.model_name = model  # Remember the working model
+                            return answer
+                    
+                    # If this model failed, try next one
+                    last_error = response.text
+                    print(f"⚠️ Model {model} failed: {last_error[:100]}...", file=sys.stderr)
+                    
+                except requests.exceptions.Timeout:
+                    print(f"⚠️ Model {model} timed out", file=sys.stderr)
+                    last_error = "Request timed out"
+                    continue
+                except Exception as e:
+                    print(f"⚠️ Model {model} error: {e}", file=sys.stderr)
+                    last_error = str(e)
+                    continue
             
-            if response.ok:
-                result = response.json()
-                
-                if 'choices' in result and len(result['choices']) > 0:
-                    answer = result['choices'][0]['message']['content']
-                    print(f"✅ Successfully generated answer ({len(answer)} chars)", file=sys.stderr)
-                    return answer
+            # All models failed
+            return f"❌ All AI models failed. Last error: {last_error}"
             
-            # If failed, return error
-            error_detail = response.text
-            print(f"❌ API Error: {error_detail[:200]}...", file=sys.stderr)
-            return f"❌ AI API error: {error_detail[:200]}..."
-            
-        except requests.exceptions.Timeout:
-            print(f"❌ Request timed out", file=sys.stderr)
-            return "❌ Request timed out after 30 seconds. Please try again."
         except Exception as e:
             print(f"❌ Unexpected error: {e}", file=sys.stderr)
             return f"❌ Error generating answer: {str(e)}"
@@ -248,13 +246,13 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         print(f"❓ Question: {question}")
         print('='*70 + "\n")
         
-        # Step 1: Search dataset
-        dataset_results = self.search_dataset(question, k=5)
+        # Step 1: Search dataset using simple keyword matching
+        dataset_results = self.search_dataset_simple(question, k=5)
         
         if dataset_results:
             print(f"📚 Found {len(dataset_results)} relevant entries in database")
             print(f"   Best match: {dataset_results[0]['question'][:60]}...")
-            print(f"   Similarity: {dataset_results[0]['score']:.1%}")
+            print(f"   Relevance: {dataset_results[0]['score']:.1%}")
             print("\n🤖 Combining database data with AI knowledge...\n")
         else:
             print("ℹ️ No direct matches in database")
@@ -271,33 +269,31 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         print(f"📊 Sources Used:")
         if dataset_results:
             print(f"   ✅ Database: {len(dataset_results)} relevant entries")
-            print(f"   ✅ AI Knowledge (Gemini 2.0 Flash): Enhanced with general expertise")
+            print(f"   ✅ AI Knowledge ({self.model_name}): Enhanced with general expertise")
         else:
             print(f"   ⚠️ Database: No relevant matches")
-            print(f"   ✅ AI Knowledge (Gemini 2.0 Flash): Full answer from general knowledge")
+            print(f"   ✅ AI Knowledge ({self.model_name}): Full answer from general knowledge")
         print(f"{'='*70}\n")
         
         return {
             'question': question,
             'answer': answer,
             'database_matches': len(dataset_results),
-            'sources': 'Database + AI (Gemini 2.0)' if dataset_results else 'AI Only (Gemini 2.0)',
+            'sources': f'Database + AI ({self.model_name})' if dataset_results else f'AI Only ({self.model_name})',
             'model_used': self.model_name
         }
     
     def initialize(self):
         """Initialize system"""
-        print("\n🚀 Initializing HYBRID RAG (Always Combined)")
+        print("\n🚀 Initializing LIGHTWEIGHT RAG (Keyword Search + AI)")
         print("="*70 + "\n")
         
         has_data = self.load_data()
         
         if has_data:
-            has_embeddings = self.setup_embeddings()
-            if has_embeddings:
-                print("\n✅ Mode: Dataset + AI Knowledge (ALWAYS COMBINED)")
-            else:
-                print("\n⚠️ Mode: AI Knowledge Only (database failed)")
+            print("\n✅ Mode: Dataset + AI Knowledge (ALWAYS COMBINED)")
+            print("   Using lightweight keyword search (no embeddings)")
+            print("   Memory usage: ~100MB (fits in 512MB free tier)")
         else:
             print("\n⚠️ Mode: AI Knowledge Only (no database)")
         
