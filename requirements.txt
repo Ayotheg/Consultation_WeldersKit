@@ -1,14 +1,8 @@
-# Core Dependencies
-pandas==2.1.4
-numpy==1.26.2
-
-# API Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-
-# HTTP Requests (for OpenRouter API)
-requests==2.31.0
-
-# Environment Variables
-python-dotenv==1.0.0
+# Minimal dependencies - most compatible
+pandas
+numpy
+fastapi
+uvicorn
+pydantic
+requests
+python-dotenv
