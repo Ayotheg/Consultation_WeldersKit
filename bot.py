@@ -62,16 +62,18 @@ class AlwaysHybridRAG:
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # ONLY USE LLAMA 3.2 - Most reliable free model
+        # Updated model list - VERIFIED WORKING FREE MODELS (Dec 2024)
         self.models = [
-            "meta-llama/llama-3.2-3b-instruct:free",      # PRIMARY - Very reliable
-            "microsoft/phi-3-mini-128k-instruct:free",    # Backup only if Llama fails
+            "google/gemini-2.0-flash-exp:free",           # PRIMARY - Fast & capable
+            "meta-llama/llama-3.2-3b-instruct:free",      # Backup 1 - Reliable
+            "qwen/qwen-2-7b-instruct:free",               # Backup 2 - Good quality
+            "google/gemini-flash-1.5:free",               # Backup 3 - Stable Gemini
         ]
-        self.model_name = self.models[0]  # Start with Llama
+        self.model_name = self.models[0]  # Track which model is currently being used
         
         print(f"✅ OpenRouter API configured successfully!", file=sys.stderr)
-        print(f"   Primary Model: Llama 3.2 (most reliable)", file=sys.stderr)
-        print(f"   Backup Model: Phi-3 Mini", file=sys.stderr)
+        print(f"   Primary Model: {self.model_name}", file=sys.stderr)
+        print(f"   Backup Models: {len(self.models)-1}", file=sys.stderr)
         print(f"   Endpoint: {self.api_url}", file=sys.stderr)
     
     def load_data(self):
@@ -169,7 +171,7 @@ Nigerian Context:
 - Common projects: Gates, railings, window protectors, carports, roofing
 - Popular welding: Arc/SMAW (affordable, works outdoors)
 """
-
+        
         # Build user message
         user_message = f"""{dataset_context if dataset_context else "No specific database matches found for this query. Provide comprehensive answer using your general knowledge."}
 
@@ -212,7 +214,7 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
                         answer = result['choices'][0]['message']['content']
                         print(f"✅ Successfully generated answer with {model} ({len(answer)} chars)", file=sys.stderr)
                         
-                        # Update the active model name so it shows correctly
+                        # IMPORTANT: Update the active model name so it shows correctly
                         self.model_name = model
                         
                         return answer
@@ -259,24 +261,13 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         
         print(f"💬 ANSWER:\n")
         print(answer)
-        
-        # Show what was used (model_name is now accurate after generation)
-        print(f"\n{'─'*70}")
-        print(f"📊 Sources Used:")
-        if dataset_results:
-            print(f"   ✅ Database: {len(dataset_results)} relevant entries")
-            print(f"   ✅ AI Knowledge: {self.model_name}")
-        else:
-            print(f"   ⚠️ Database: No relevant matches")
-            print(f"   ✅ AI Knowledge: {self.model_name}")
-        print(f"{'='*70}\n")
+        print(f"\n{'='*70}\n")
         
         return {
             'question': question,
             'answer': answer,
             'database_matches': len(dataset_results),
-            'sources': f'Database + AI ({self.model_name})' if dataset_results else f'AI Only ({self.model_name})',
-            'model_used': self.model_name  # This now reflects the ACTUAL model that succeeded
+            'model_used': self.model_name
         }
     
     def initialize(self):
@@ -290,7 +281,6 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
             print("\n✅ Mode: Dataset + AI Knowledge (ALWAYS COMBINED)")
             print("   Using lightweight keyword search (no embeddings)")
             print("   Memory usage: ~100MB (fits in 512MB free tier)")
-            print("   AI Model: Llama 3.2 3B (most reliable free model)")
         else:
             print("\n⚠️ Mode: AI Knowledge Only (no database)")
         
