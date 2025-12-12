@@ -62,12 +62,15 @@ class AlwaysHybridRAG:
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # Updated model list - VERIFIED WORKING FREE MODELS (Dec 2024)
+        # Updated model list - Most Reliable Free Models (Dec 2024)
+        # Note: Free models require privacy settings enabled on OpenRouter
         self.models = [
-            "google/gemini-2.0-flash-exp:free",           # PRIMARY - Fast & capable
-            "meta-llama/llama-3.2-3b-instruct:free",      # Backup 1 - Reliable
-            "qwen/qwen-2-7b-instruct:free",               # Backup 2 - Good quality
-            "google/gemini-flash-1.5:free",               # Backup 3 - Stable Gemini
+            "meta-llama/llama-3.2-3b-instruct:free",               # Most reliable free model
+            "meta-llama/llama-3.1-8b-instruct:free",               # Stable Llama alternative
+            "qwen/qwen-2-7b-instruct:free",                        # Good quality Chinese model
+            "mistralai/mistral-7b-instruct:free",                  # Stable Mistral
+            "nousresearch/hermes-3-llama-3.1-405b:free",          # Powerful backup
+            "google/gemini-2.0-flash-exp:free",                    # Gemini (if available)
         ]
         self.model_name = self.models[0]  # Track which model is currently being used
         
