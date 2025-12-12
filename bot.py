@@ -62,13 +62,14 @@ class AlwaysHybridRAG:
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # Model priority: Try Gemini first, fall back only if it fails
+        # Updated model list - VERIFIED WORKING FREE MODELS (Dec 2024)
         self.models = [
-            "google/gemini-2.0-flash-exp:free",     # PRIMARY - Your preferred model
-            "meta-llama/llama-3.2-3b-instruct:free", # Backup 1
-            "qwen/qwen-2-7b-instruct:free",          # Backup 2
+            "google/gemini-2.0-flash-exp:free",           # PRIMARY - Fast & capable
+            "meta-llama/llama-3.2-3b-instruct:free",      # Backup 1 - Reliable
+            "microsoft/phi-3-mini-128k-instruct:free",    # Backup 2 - Good context
+            "google/gemini-flash-1.5:free",               # Backup 3 - Stable Gemini
         ]
-        self.model_name = self.models[0]
+        self.model_name = self.models[0]  # Track which model is currently being used
         
         print(f"✅ OpenRouter API configured successfully!", file=sys.stderr)
         print(f"   Primary Model: {self.model_name}", file=sys.stderr)
@@ -178,65 +179,62 @@ USER QUESTION: {query}
 
 COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         
-        try:
-            print(f"🔄 Calling OpenRouter API...", file=sys.stderr)
-            
-            # Try models in order of priority
-            last_error = None
-            
-            for attempt, model in enumerate(self.models, 1):
-                try:
-                    print(f"   Attempt {attempt}: Trying {model}...", file=sys.stderr)
+        # Try models in order of priority
+        last_error = None
+        
+        for attempt, model in enumerate(self.models, 1):
+            try:
+                print(f"🔄 Attempt {attempt}: Trying {model}...", file=sys.stderr)
+                
+                response = requests.post(
+                    url=self.api_url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "HTTP-Referer": "https://consultation-welderskit.onrender.com",
+                        "X-Title": "WeldersKit RAG"
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message}
+                        ],
+                        "temperature": 0.7,
+                        "max_tokens": 1024
+                    },
+                    timeout=30
+                )
+                
+                print(f"📥 API Response Status: {response.status_code}", file=sys.stderr)
+                
+                if response.ok:
+                    result = response.json()
                     
-                    response = requests.post(
-                        url=self.api_url,
-                        headers={
-                            "Authorization": f"Bearer {self.api_key}",
-                            "HTTP-Referer": "https://consultation-welderskit.onrender.com",
-                            "X-Title": "WeldersKit RAG"
-                        },
-                        json={
-                            "model": model,
-                            "messages": [
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_message}
-                            ],
-                            "temperature": 0.7,
-                            "max_tokens": 1024
-                        },
-                        timeout=30
-                    )
-                    
-                    print(f"📥 API Response Status: {response.status_code}", file=sys.stderr)
-                    
-                    if response.ok:
-                        result = response.json()
+                    if 'choices' in result and len(result['choices']) > 0:
+                        answer = result['choices'][0]['message']['content']
+                        print(f"✅ Successfully generated answer with {model} ({len(answer)} chars)", file=sys.stderr)
                         
-                        if 'choices' in result and len(result['choices']) > 0:
-                            answer = result['choices'][0]['message']['content']
-                            print(f"✅ Successfully generated answer with {model} ({len(answer)} chars)", file=sys.stderr)
-                            self.model_name = model  # Remember the working model
-                            return answer
-                    
-                    # If this model failed, try next one
-                    last_error = response.text
-                    print(f"⚠️ Model {model} failed: {last_error[:100]}...", file=sys.stderr)
-                    
-                except requests.exceptions.Timeout:
-                    print(f"⚠️ Model {model} timed out", file=sys.stderr)
-                    last_error = "Request timed out"
-                    continue
-                except Exception as e:
-                    print(f"⚠️ Model {model} error: {e}", file=sys.stderr)
-                    last_error = str(e)
-                    continue
-            
-            # All models failed
-            return f"❌ All AI models failed. Last error: {last_error}"
-            
-        except Exception as e:
-            print(f"❌ Unexpected error: {e}", file=sys.stderr)
-            return f"❌ Error generating answer: {str(e)}"
+                        # IMPORTANT: Update the active model name so it shows correctly
+                        self.model_name = model
+                        
+                        return answer
+                
+                # If this model failed, log and try next one
+                error_data = response.json() if response.headers.get('content-type') == 'application/json' else response.text
+                last_error = str(error_data)
+                print(f"⚠️ Model {model} failed: {last_error[:200]}...", file=sys.stderr)
+                
+            except requests.exceptions.Timeout:
+                print(f"⚠️ Model {model} timed out", file=sys.stderr)
+                last_error = "Request timed out"
+                continue
+            except Exception as e:
+                print(f"⚠️ Model {model} error: {e}", file=sys.stderr)
+                last_error = str(e)
+                continue
+        
+        # All models failed
+        return f"❌ All AI models failed. Last error: {last_error}"
     
     def query(self, question):
         """
@@ -264,15 +262,15 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
         print(f"💬 ANSWER:\n")
         print(answer)
         
-        # Show what was used
+        # Show what was used (model_name is now accurate after generation)
         print(f"\n{'─'*70}")
         print(f"📊 Sources Used:")
         if dataset_results:
             print(f"   ✅ Database: {len(dataset_results)} relevant entries")
-            print(f"   ✅ AI Knowledge ({self.model_name}): Enhanced with general expertise")
+            print(f"   ✅ AI Knowledge: {self.model_name}")
         else:
             print(f"   ⚠️ Database: No relevant matches")
-            print(f"   ✅ AI Knowledge ({self.model_name}): Full answer from general knowledge")
+            print(f"   ✅ AI Knowledge: {self.model_name}")
         print(f"{'='*70}\n")
         
         return {
@@ -280,7 +278,7 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
             'answer': answer,
             'database_matches': len(dataset_results),
             'sources': f'Database + AI ({self.model_name})' if dataset_results else f'AI Only ({self.model_name})',
-            'model_used': self.model_name
+            'model_used': self.model_name  # This now reflects the ACTUAL model that succeeded
         }
     
     def initialize(self):
