@@ -68,7 +68,6 @@ class QuestionRequest(BaseModel):
 
 class AnswerResponse(BaseModel):
     answer: str
-    sources: str
     model_used: str
     database_matches: int
 
@@ -144,7 +143,6 @@ async def ask_question(request: QuestionRequest):
         
         return AnswerResponse(
             answer=result['answer'],
-            sources=result['sources'],
             model_used=result.get('model_used', 'google/gemini-2.0-flash-exp:free'),
             database_matches=result.get('database_matches', 0)
         )
