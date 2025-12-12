@@ -16,16 +16,16 @@ if st.button("Get Answer"):
             try:
                 # Call the correct endpoint: /api/ask
                 response = requests.post(
-                    f"{BACKEND_URL}/api/ask",  # ✅ Correct endpoint
+                    f"{BACKEND_URL}/api/ask",
                     json={"question": question},
-                    timeout=60  # Important: Render free tier can be slow on first request
+                    timeout=60
                 )
                 
                 if response.status_code == 200:
                     result = response.json()
                     st.success("✅ Answer:")
                     st.write(result["answer"])
-                    st.caption(f"Source: {result['sources']}")
+                    # Source caption removed - no longer displayed
                 else:
                     st.error(f"Error {response.status_code}: {response.text}")
                     
