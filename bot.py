@@ -62,18 +62,16 @@ class AlwaysHybridRAG:
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # Updated model list - VERIFIED WORKING FREE MODELS (Dec 2024)
+        # ONLY USE LLAMA 3.2 - Most reliable free model
         self.models = [
-            "google/gemini-2.0-flash-exp:free",           # PRIMARY - Fast & capable
-            "meta-llama/llama-3.2-3b-instruct:free",      # Backup 1 - Reliable
-            "microsoft/phi-3-mini-128k-instruct:free",    # Backup 2 - Good context
-            "google/gemini-flash-1.5:free",               # Backup 3 - Stable Gemini
+            "meta-llama/llama-3.2-3b-instruct:free",      # PRIMARY - Very reliable
+            "microsoft/phi-3-mini-128k-instruct:free",    # Backup only if Llama fails
         ]
-        self.model_name = self.models[0]  # Track which model is currently being used
+        self.model_name = self.models[0]  # Start with Llama
         
         print(f"✅ OpenRouter API configured successfully!", file=sys.stderr)
-        print(f"   Primary Model: {self.model_name}", file=sys.stderr)
-        print(f"   Backup Models: {len(self.models)-1}", file=sys.stderr)
+        print(f"   Primary Model: Llama 3.2 (most reliable)", file=sys.stderr)
+        print(f"   Backup Model: Phi-3 Mini", file=sys.stderr)
         print(f"   Endpoint: {self.api_url}", file=sys.stderr)
     
     def load_data(self):
@@ -214,7 +212,7 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
                         answer = result['choices'][0]['message']['content']
                         print(f"✅ Successfully generated answer with {model} ({len(answer)} chars)", file=sys.stderr)
                         
-                        # IMPORTANT: Update the active model name so it shows correctly
+                        # Update the active model name so it shows correctly
                         self.model_name = model
                         
                         return answer
@@ -292,6 +290,7 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
             print("\n✅ Mode: Dataset + AI Knowledge (ALWAYS COMBINED)")
             print("   Using lightweight keyword search (no embeddings)")
             print("   Memory usage: ~100MB (fits in 512MB free tier)")
+            print("   AI Model: Llama 3.2 3B (most reliable free model)")
         else:
             print("\n⚠️ Mode: AI Knowledge Only (no database)")
         
