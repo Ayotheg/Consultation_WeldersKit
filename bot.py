@@ -1,4 +1,4 @@
-import pandas as pd
+ import pandas as pd
 import numpy as np
 import requests
 import os
@@ -62,15 +62,17 @@ class AlwaysHybridRAG:
         self.api_key = api_key
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # Updated model list - Most Reliable Free Models (Dec 2024)
+        # Updated model list - Verified Free Models (March 2026)
         # Note: Free models require privacy settings enabled on OpenRouter
         self.models = [
-            "meta-llama/llama-3.2-3b-instruct:free",               # Most reliable free model
-            "meta-llama/llama-3.1-8b-instruct:free",               # Stable Llama alternative
-            "qwen/qwen-2-7b-instruct:free",                        # Good quality Chinese model
-            "mistralai/mistral-7b-instruct:free",                  # Stable Mistral
-            "nousresearch/hermes-3-llama-3.1-405b:free",          # Powerful backup
-            "google/gemini-2.0-flash-exp:free",                    # Gemini (if available)
+            "openrouter/free",                                     # Auto-routes to best available free model
+            "google/gemma-3-12b-it:free",                          # Confirmed working Google model
+            "google/gemma-3n-e4b-it:free",                         # Confirmed working Google Gemma 3n
+            "meta-llama/llama-3.3-70b-instruct:free",              # Best quality when available - 70B
+            "google/gemma-3-27b-it:free",                          # Strong Google model - 27B
+            "mistralai/mistral-small-3.1-24b-instruct:free",       # Reliable Mistral - 24B
+            "qwen/qwen3-4b:free",                                  # Fast Qwen3 fallback
+            "meta-llama/llama-3.2-3b-instruct:free",               # Lightweight fast fallback
         ]
         self.model_name = self.models[0]  # Track which model is currently being used
         
