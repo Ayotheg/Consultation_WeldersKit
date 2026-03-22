@@ -19,14 +19,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware
+# CORS middleware - Allow all for reliability during debugging
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://consultation-welderskit.streamlit.app",
-        "http://localhost:8501",
-        "*"  # Allow all origins in development
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -79,7 +75,7 @@ async def root():
         "message": "WeldersKit AI API",
         "status": "online",
         "version": "1.0.0",
-        "model": "google/gemini-2.0-flash-exp:free (via OpenRouter)",
+        "model": "google/gemini-2.0-flash:free (via OpenRouter)",
         "search_method": "Lightweight keyword search (no embeddings)",
         "features": [
             "Keyword-based database search",
@@ -139,11 +135,17 @@ async def ask_question(request: QuestionRequest):
             )
         
         # Use the RAG system to get answer
+        print(f"DEBUG: Processing question: {request.question[:50]}...", file=os.sys.stderr)
         result = rag.query(request.question)
         
+        answer_text = result.get('answer', '❌ No answer generated')
+        model = result.get('model_used', 'unknown')
+        
+        print(f"✅ Backend generated answer ({len(answer_text)} chars) using {model}", file=os.sys.stderr)
+        
         return AnswerResponse(
-            answer=result['answer'],
-            model_used=result.get('model_used', 'google/gemini-2.0-flash-exp:free'),
+            answer=answer_text,
+            model_used=model,
             database_matches=result.get('database_matches', 0)
         )
     
