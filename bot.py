@@ -66,10 +66,10 @@ class AlwaysHybridRAG:
         # Note: Free models require privacy settings enabled on OpenRouter
         self.models = [
             "openrouter/free",                                     # Auto-routes to best available free model
+            "google/gemini-2.0-flash-exp:free",                    # High reliability Gemini 2.0 Flash
             "google/gemma-3-12b-it:free",                          # Confirmed working Google model
-            "google/gemma-3n-e4b-it:free",                         # Confirmed working Google Gemma 3n
-            "meta-llama/llama-3.3-70b-instruct:free",              # Best quality when available - 70B
             "google/gemma-3-27b-it:free",                          # Strong Google model - 27B
+            "meta-llama/llama-3.3-70b-instruct:free",              # Best quality when available - 70B
             "mistralai/mistral-small-3.1-24b-instruct:free",       # Reliable Mistral - 24B
             "qwen/qwen3-4b:free",                                  # Fast Qwen3 fallback
             "meta-llama/llama-3.2-3b-instruct:free",               # Lightweight fast fallback
@@ -98,6 +98,13 @@ class AlwaysHybridRAG:
             print(f"⚠️ Could not load dataset: {e}")
             return False
     
+    def is_greeting(self, query):
+        """Check if the query is a simple greeting"""
+        greetings = {'hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'greetings', 'hi!', 'hello!', 'hey!'}
+        # Clean query: lowercase, remove extra punctuation
+        clean_query = query.lower().strip().strip('?!.')
+        return clean_query in greetings
+
     def search_dataset_simple(self, query, k=5):
         """Simple keyword-based search (no embeddings needed!)"""
         if self.df is None or len(self.df) == 0:
@@ -152,29 +159,32 @@ class AlwaysHybridRAG:
                 dataset_context += f"   Relevance: {result['score']:.1%}\n\n"
         
         # Enhanced system prompt
-        system_prompt = """You are an expert welding and construction consultant for WeldersKit in Nigeria.
+        is_greeting = self.is_greeting(query)
+        
+        system_prompt = f"""You are an expert welding and construction consultant for WeldersKit in Nigeria.
+        
+Your role: Provide comprehensive, professional, and helpful answers by SYNTHESIZING:
+1. Specific raw data from the WeldersKit database (provided as context)
+2. Your advanced general welding and construction expertise
+3. Nigerian market context and local practices
 
-Your role: Provide comprehensive answers by COMBINING:
-1. Specific data from the WeldersKit database (when available)
-2. Your general welding and construction knowledge
-3. Nigerian market context and practices
+{"WARM WELCOME MODE: The user has just said hello. Respond with a very warm, professional Nigerian welcome like 'Ekuabo!' (if appropriate) or a friendly 'How can I help you today?'. Mention that you are here to help with welding materials, project costs, or technical advice. Be playful and humble (e.g., 'I may be just an AI, but I have the latest market data to help you!')." if is_greeting else ""}
 
-IMPORTANT INSTRUCTIONS:
-- If database has relevant info, START with that data
-- Then ADD your general knowledge to expand the answer
-- Fill in any gaps the database doesn't cover
-- Provide practical, actionable advice
-- Mention prices in Nigerian Naira (₦)
-- Consider Nigerian climate (humid, tropical)
-- Reference local markets when relevant (Idumota, Ladipo, Trade Fair)
-- If database info seems outdated or incomplete, mention it and provide updated guidance
-- Never say "I don't have information" if you can provide general guidance
+INSTRUCTIONS FOR REFINING OUTPUT:
+- DO NOT just list the database results. REFINE and INTEGRATE them into a natural response.
+- If database has relevant price data, use it as your primary source but explain it clearly.
+- Expand with technical details (e.g., if asked about pipes, explain thickness, rust prevention, and common uses).
+- Fill in any gaps the database doesn't cover using your AI knowledge.
+- Mention prices in Nigerian Naira (₦).
+- Consider Nigerian climate (high humidity, tropical rust risks).
+- Reference local markets: Idumota, Ladipo, Trade Fair, Dei Dei (Abuja).
+- If database info seems outdated or incomplete, provide updated guidance based on current market trends.
+- ALWAYS complete your thoughts. Do not stop mid-sentence.
 
-Nigerian Context:
-- Main markets: Idumota (Lagos), Ladipo (Lagos), Trade Fair Complex, Dei Dei (Abuja)
-- Climate: Hot, humid (rust prevention important)
-- Common projects: Gates, railings, window protectors, carports, roofing
-- Popular welding: Arc/SMAW (affordable, works outdoors)
+Nigerian Context Recap:
+- Markets: Idumota (Lagos), Ladipo (Lagos), Trade Fair, Dei Dei (Abuja).
+- Common projects: Gates, railings, window protectors, carports, roofing.
+- Popular welding: Arc/SMAW (standard), MIG/TIG for stainless.
 """
         
         # Build user message
@@ -204,8 +214,9 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_message}
                         ],
-                        "temperature": 0.7,
-                        "max_tokens": 1024
+                        "temperature": 0.5,  # Lower temperature for more consistent, full responses
+                        "max_tokens": 2048,   # Increased to prevent truncation
+                        "top_p": 0.9
                     },
                     timeout=30
                 )
