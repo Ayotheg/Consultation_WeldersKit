@@ -26,20 +26,14 @@ if st.button("Get Answer"):
                         result = response.json()
                         st.success("✅ Answer:")
                         st.write(result["answer"])
-                        st.caption(f"Model: {result.get('model_used', 'unknown')} | Status: {response.status_code}")
                     except ValueError:
-                        st.error("❌ Backend returned 200 but response was not valid JSON.")
-                        st.code(response.text)
+                        st.error("❌ Sorry, something went wrong with the answer generation. Please try again.")
                 else:
-                    st.error(f"❌ Error {response.status_code}")
-                    st.warning("Render backend might be failing or returning an error page.")
-                    with st.expander("Show detailed error"):
-                        st.write(response.text)
+                    st.error("❌ Service temporarily busy. Please try again in a few minutes.")
                     
             except requests.exceptions.Timeout:
-                st.error("⏱️ Request timed out. The backend might be taking too long to process (free tier can be slow).")
-            except Exception as e:
-                st.error(f"❌ Connection Failed: {str(e)}")
-                st.info(f"Connecting to Backend: {BACKEND_URL}")
+                st.error("⏱️ Connection timed out. Please try again.")
+            except Exception:
+                st.error("❌ Connection failed. Please try again later.")
     else:
         st.warning("Please enter a question")
