@@ -66,15 +66,15 @@ class AlwaysHybridRAG:
         # Note: Free models require privacy settings enabled on OpenRouter
         self.models = [
             "openrouter/free",                                     # Auto-routes to best available free model
-            "google/gemini-2.0-flash-exp:free",                    # High reliability Gemini 2.0 Flash
-            "google/gemma-3-12b-it:free",                          # Confirmed working Google model
-            "google/gemma-3-27b-it:free",                          # Strong Google model - 27B
-            "meta-llama/llama-3.3-70b-instruct:free",              # Best quality when available - 70B
-            "mistralai/mistral-small-3.1-24b-instruct:free",       # Reliable Mistral - 24B
-            "qwen/qwen3-4b:free",                                  # Fast Qwen3 fallback
-            "meta-llama/llama-3.2-3b-instruct:free",               # Lightweight fast fallback
+            "google/gemini-2.0-flash:free",                        # Industry-leading 1M context, high reliability
+            "openai/gpt-oss-20b:free",                             # Optimized for agentic tasks and reasoning
+            "nvidia/nemotron-3-super-120b-a12b:free",              # High performance MoE with 262K context
+            "stepfun/step-3.5-flash:free",                         # Flash version, excellent for fast RAG
+            "meta-llama/llama-3.3-70b-instruct:free",               # GPT-4 level logic and instruction following
+            "arcee-ai/trinity-large-preview:free",                 # Strong agentic performance
+            "liquid/lfm2.5-1.2b-thinking:free",                    # Specialized deep reasoning/thinking model
         ]
-        self.model_name = self.models[0]  # Track which model is currently being used
+        self.model_name = self.models[1]  # Track which model is currently being used (Gemini 2.0 Flash)
         
         print(f"✅ OpenRouter API configured successfully!", file=sys.stderr)
         print(f"   Primary Model: {self.model_name}", file=sys.stderr)
@@ -225,20 +225,22 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
                 
                 if response.ok:
                     result = response.json()
-                    
                     if 'choices' in result and len(result['choices']) > 0:
                         answer = result['choices'][0]['message']['content']
                         print(f"✅ Successfully generated answer with {model} ({len(answer)} chars)", file=sys.stderr)
-                        
-                        # IMPORTANT: Update the active model name so it shows correctly
                         self.model_name = model
-                        
+                        print(f"DEBUG: Answer preview: {answer[:50]}...", file=sys.stderr)
                         return answer
-                
-                # If this model failed, log and try next one
-                error_data = response.json() if response.headers.get('content-type') == 'application/json' else response.text
-                last_error = str(error_data)
-                print(f"⚠️ Model {model} failed: {last_error[:200]}...", file=sys.stderr)
+                    else:
+                        print(f"⚠️ Model {model} returned successful response but no content: {result}", file=sys.stderr)
+                        last_error = "No choices in response"
+                else:
+                    try:
+                        error_data = response.json()
+                    except:
+                        error_data = response.text
+                    last_error = str(error_data)
+                    print(f"⚠️ Model {model} failed with status {response.status_code}: {last_error[:200]}...", file=sys.stderr)
                 
             except requests.exceptions.Timeout:
                 print(f"⚠️ Model {model} timed out", file=sys.stderr)
@@ -250,7 +252,7 @@ COMPREHENSIVE ANSWER (combine database info + your knowledge):"""
                 continue
         
         # All models failed
-        return f"❌ All AI models failed. Last error: {last_error}"
+        return f"❌ All AI models failed to provide an answer. Last error: {last_error}"
     
     def query(self, question):
         """
