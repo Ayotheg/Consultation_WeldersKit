@@ -22,16 +22,24 @@ if st.button("Get Answer"):
                 )
                 
                 if response.status_code == 200:
-                    result = response.json()
-                    st.success("✅ Answer:")
-                    st.write(result["answer"])
-                    # Source caption removed - no longer displayed
+                    try:
+                        result = response.json()
+                        st.success("✅ Answer:")
+                        st.write(result["answer"])
+                        st.caption(f"Model: {result.get('model_used', 'unknown')} | Status: {response.status_code}")
+                    except ValueError:
+                        st.error("❌ Backend returned 200 but response was not valid JSON.")
+                        st.code(response.text)
                 else:
-                    st.error(f"Error {response.status_code}: {response.text}")
+                    st.error(f"❌ Error {response.status_code}")
+                    st.warning("Render backend might be failing or returning an error page.")
+                    with st.expander("Show detailed error"):
+                        st.write(response.text)
                     
             except requests.exceptions.Timeout:
-                st.error("⏱️ Request timed out. The backend might be waking up (Render free tier). Please try again.")
+                st.error("⏱️ Request timed out. The backend might be taking too long to process (free tier can be slow).")
             except Exception as e:
-                st.error(f"❌ Failed to connect: {str(e)}")
+                st.error(f"❌ Connection Failed: {str(e)}")
+                st.info(f"Connecting to Backend: {BACKEND_URL}")
     else:
         st.warning("Please enter a question")
